@@ -106,7 +106,7 @@ table{width:100%;border-collapse:collapse;background:white;border:1px solid var(
     <section class="card alertaNm3 destaque" id="rankingTurma">
       <div class="sectionTag">RANKING DA TURMA</div>
       <h2>Ranking de desempenho e frequência</h2>
-      <p>Lista automática com os 03 maiores desempenhos, 03 maiores presenças, 03 menores desempenhos e 03 piores frequências.</p>
+      <p>Lista automática com os 03 maiores desempenhos, 03 maiores presenças, 03 menores desempenhos e 03 piores frequências. Alunos com todas as notas em branco e sem presença/falta registrada não são considerados.</p>
       <div id="listaRanking" class="faltandoBox"></div>
     </section>
 
@@ -259,6 +259,9 @@ function analisar(alunos){
       return { disciplina: r.disciplina, media: notaBase };
     });
     const totalFaltas = a.rows.reduce((s,r)=>s+(Number(r.faltas)||0),0);
+    // Regra: aluno com todas as notas em branco e sem nenhuma falta/presença registrada
+    // não entra no relatório nem nos rankings.
+    const alunoSemDadosRelatorio = notasValidas.length === 0 && totalFaltas === 0;
     // Risco por faltas deve considerar apenas componente curricular acima do limite, não o TGF/total geral.
     const faltasAltas = a.rows
       .filter(r => (Number(r.faltas)||0) >= limiteFaltas)
@@ -269,7 +272,7 @@ function analisar(alunos){
     if(faltasAltas.length) obs.push(`Componentes com faltas acima do limite: ${faltasAltas.map(f => `${f.disciplina} (${f.faltas})`).join('; ')}.`);
     if(disciplinasSemMt.length) obs.push(`Possui ${disciplinasSemMt.length} disciplina(s) com 1ºMT em branco.`);
     if(!obs.length) obs.push('Sem risco pelos critérios informados.');
-    return {...a, totalDisciplinas, nm3Lancadas, disciplinasSemNm3, mtLancadas, disciplinasSemMt, mediaGeral, notasValidas: notasValidas.length, emRisco, totalFaltas, faltasAltas, situacao, obs:obs.join(' ')};
+    return {...a, totalDisciplinas, nm3Lancadas, disciplinasSemNm3, mtLancadas, disciplinasSemMt, mediaGeral, notasValidas: notasValidas.length, alunoSemDadosRelatorio, emRisco, totalFaltas, faltasAltas, situacao, obs:obs.join(' ')};
   });
 }
 
@@ -279,11 +282,12 @@ function mediaTexto(valor){
 }
 
 function montarRankings(dados){
-  const validos = dados.filter(d => d.mediaGeral !== null && !Number.isNaN(d.mediaGeral));
+  const dadosConsiderados = dados.filter(d => !d.alunoSemDadosRelatorio);
+  const validos = dadosConsiderados.filter(d => d.mediaGeral !== null && !Number.isNaN(d.mediaGeral));
   const porMaiorNota = [...validos].sort((a,b) => (b.mediaGeral - a.mediaGeral) || (a.totalFaltas - b.totalFaltas) || a.aluno.localeCompare(b.aluno)).slice(0,3);
   const porMenorNota = [...validos].sort((a,b) => (a.mediaGeral - b.mediaGeral) || (b.totalFaltas - a.totalFaltas) || a.aluno.localeCompare(b.aluno)).slice(0,3);
-  const porMaiorPresenca = [...dados].sort((a,b) => (a.totalFaltas - b.totalFaltas) || ((b.mediaGeral ?? -1) - (a.mediaGeral ?? -1)) || a.aluno.localeCompare(b.aluno)).slice(0,3);
-  const porPiorFrequencia = [...dados].sort((a,b) => (b.totalFaltas - a.totalFaltas) || ((a.mediaGeral ?? 99) - (b.mediaGeral ?? 99)) || a.aluno.localeCompare(b.aluno)).slice(0,3);
+  const porMaiorPresenca = [...dadosConsiderados].sort((a,b) => (a.totalFaltas - b.totalFaltas) || ((b.mediaGeral ?? -1) - (a.mediaGeral ?? -1)) || a.aluno.localeCompare(b.aluno)).slice(0,3);
+  const porPiorFrequencia = [...dadosConsiderados].sort((a,b) => (b.totalFaltas - a.totalFaltas) || ((a.mediaGeral ?? 99) - (b.mediaGeral ?? 99)) || a.aluno.localeCompare(b.aluno)).slice(0,3);
   return {porMaiorNota, porMaiorPresenca, porMenorNota, porPiorFrequencia};
 }
 
@@ -453,29 +457,36 @@ function gerarPdfOrganizado(){
   doc.text('Ranking da turma', margem, y);
   y += 4;
 
-  const linhasRanking = [];
-  const addRanking = (titulo, lista) => {
-    lista.forEach((d,i) => linhasRanking.push([titulo, `${i+1}º`, textoSeguro(d.aluno), mediaTexto(d.mediaGeral), String(d.totalFaltas)]));
-    if(!lista.length) linhasRanking.push([titulo, '-', 'Sem dados suficientes', '-', '-']);
-  };
-  addRanking('Top 03 maiores notas', rankings.porMaiorNota);
-  addRanking('Top 03 maiores presenças', rankings.porMaiorPresenca);
-  addRanking('Top 03 piores notas', rankings.porMenorNota);
-  addRanking('Top 03 piores frequências', rankings.porPiorFrequencia);
+  function desenharSegmentoRanking(titulo, lista, corCabecalho){
+    if(y > pageH - 45){ doc.addPage(); cabecalho(); y = topoConteudo; }
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(9.5);
+    doc.text(titulo, margem, y);
+    y += 3.5;
 
-  doc.autoTable({
-    startY: y,
-    margin: { top: topoConteudo, left: margem, right: margem, bottom: margemRodape },
-    theme: 'grid',
-    head: [['Ranking', 'Posição', 'Aluno', 'Média geral', 'Total de faltas']],
-    body: linhasRanking,
-    styles: { fontSize: 8, cellPadding: 2.1, overflow: 'linebreak', valign: 'top' },
-    headStyles: { fillColor: [22,101,52], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [248,250,252] },
-    columnStyles: { 0:{cellWidth:52}, 1:{cellWidth:18, halign:'center'}, 2:{cellWidth:'auto'}, 3:{cellWidth:25, halign:'center'}, 4:{cellWidth:25, halign:'center'} },
-    didDrawPage: cabecalho
-  });
-  y = doc.lastAutoTable.finalY + 8;
+    const corpo = lista.length
+      ? lista.map((d,i) => [`${i+1}º`, textoSeguro(d.aluno), mediaTexto(d.mediaGeral), String(d.totalFaltas)])
+      : [['-', 'Sem dados suficientes', '-', '-']];
+
+    doc.autoTable({
+      startY: y,
+      margin: { top: topoConteudo, left: margem, right: margem, bottom: margemRodape },
+      theme: 'grid',
+      head: [['Posição', 'Aluno', 'Média geral', 'Total de faltas']],
+      body: corpo,
+      styles: { fontSize: 8, cellPadding: 2.1, overflow: 'linebreak', valign: 'top' },
+      headStyles: { fillColor: corCabecalho, textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248,250,252] },
+      columnStyles: { 0:{cellWidth:18, halign:'center'}, 1:{cellWidth:'auto'}, 2:{cellWidth:28, halign:'center'}, 3:{cellWidth:28, halign:'center'} },
+      didDrawPage: cabecalho
+    });
+    y = doc.lastAutoTable.finalY + 6;
+  }
+
+  desenharSegmentoRanking('Top 03 maiores notas', rankings.porMaiorNota, [22,101,52]);
+  desenharSegmentoRanking('Top 03 maiores presenças', rankings.porMaiorPresenca, [15,47,102]);
+  desenharSegmentoRanking('Top 03 piores notas', rankings.porMenorNota, [146,64,14]);
+  desenharSegmentoRanking('Top 03 piores frequências', rankings.porPiorFrequencia, [185,28,28]);
 
   const nm3Faltando = dadosGerados.filter(d=>d.disciplinasSemNm3 && d.disciplinasSemNm3.length);
   doc.setFont('helvetica','bold');
@@ -609,9 +620,11 @@ $('btnAnalisar').addEventListener('click', async () => {
       $('status').innerHTML = '<div class="aviso">Não consegui identificar alunos no PDF. Confira se o arquivo é o boletim gerado pelo ISEDUC.</div>';
       return;
     }
-    const dados = analisar(alunos);
+    const dadosBrutos = analisar(alunos);
+    const alunosIgnorados = dadosBrutos.filter(d => d.alunoSemDadosRelatorio).length;
+    const dados = dadosBrutos.filter(d => !d.alunoSemDadosRelatorio);
     render(dados);
-    $('status').textContent = `Análise concluída: ${dados.length} aluno(s) encontrado(s).`;
+    $('status').textContent = `Análise concluída: ${dados.length} aluno(s) considerado(s) no relatório.${alunosIgnorados ? ' ' + alunosIgnorados + ' aluno(s) com todas as notas em branco e sem presença/falta registrada foram ignorados.' : ''}`;
   }catch(e){
     console.error(e);
     $('status').innerHTML = `<div class="aviso">Erro ao analisar o PDF: ${e.message || e}</div>`;
