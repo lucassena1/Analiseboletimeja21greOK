@@ -110,6 +110,13 @@ table{width:100%;border-collapse:collapse;background:white;border:1px solid var(
       <div id="listaRanking" class="faltandoBox"></div>
     </section>
 
+    <section class="card alertaNm3 destaque" id="analisesAvancadas">
+      <div class="sectionTag">ANÁLISES PEDAGÓGICAS</div>
+      <h2>Indicadores complementares da turma</h2>
+      <p>Resumo estratégico com média geral, alunos acima/abaixo da média, possível evasão e disciplinas com maior dificuldade.</p>
+      <div id="listaAnalisesAvancadas" class="faltandoBox"></div>
+    </section>
+
     <section class="card">
     <h2>Detalhamento por aluno</h2>
     <table>
@@ -304,6 +311,89 @@ function renderRankingHtml(dados){
          tabela('Top 03 piores frequências', r.porPiorFrequencia);
 }
 
+
+function montarAnalisesAvancadas(dados){
+  const mediaMinima = Number($('mediaMinima').value || 6);
+  const considerados = dados.filter(d => !d.alunoSemDadosRelatorio);
+  const comMedia = considerados.filter(d => d.mediaGeral !== null && !Number.isNaN(d.mediaGeral));
+  const mediaTurma = comMedia.length ? comMedia.reduce((s,d)=>s+d.mediaGeral,0) / comMedia.length : null;
+  const acimaMedia = comMedia.filter(d => d.mediaGeral >= mediaMinima).length;
+  const abaixoMedia = comMedia.filter(d => d.mediaGeral < mediaMinima).length;
+
+  const mapaDisciplinas = new Map();
+  considerados.forEach(aluno => {
+    aluno.rows.forEach(r => {
+      if(!r.disciplina) return;
+      const notaBase = r.mtf !== null ? r.mtf : r.mt;
+      if(!mapaDisciplinas.has(r.disciplina)) mapaDisciplinas.set(r.disciplina, {disciplina:r.disciplina, avaliados:0, abaixo:0, soma:0});
+      const item = mapaDisciplinas.get(r.disciplina);
+      if(notaBase !== null && !Number.isNaN(notaBase)){
+        item.avaliados++;
+        item.soma += notaBase;
+        if(notaBase < mediaMinima) item.abaixo++;
+      }
+    });
+  });
+  const disciplinasCriticas = [...mapaDisciplinas.values()]
+    .filter(d => d.avaliados > 0)
+    .map(d => ({...d, media: d.soma / d.avaliados, percentual: d.abaixo / d.avaliados * 100}))
+    .sort((a,b) => (b.abaixo - a.abaixo) || (b.percentual - a.percentual) || (a.media - b.media))
+    .slice(0,10);
+
+  const riscoPorAluno = considerados.map(d => {
+    let nivel = 'Controlado';
+    if(d.emRisco.length >= 5 || d.totalFaltas >= 75) nivel = 'Crítico';
+    else if(d.emRisco.length >= 3 || d.totalFaltas >= 25) nivel = 'Atenção';
+    return {...d, nivelRisco:nivel};
+  });
+  const alunosCriticos = riscoPorAluno.filter(d => d.nivelRisco === 'Crítico')
+    .sort((a,b) => (b.emRisco.length - a.emRisco.length) || (b.totalFaltas - a.totalFaltas) || ((a.mediaGeral ?? 99) - (b.mediaGeral ?? 99)));
+  const alunosAtencao = riscoPorAluno.filter(d => d.nivelRisco === 'Atenção').length;
+  const alunosControlados = riscoPorAluno.filter(d => d.nivelRisco === 'Controlado').length;
+
+  const proximosMedia = comMedia.filter(d => d.mediaGeral >= (mediaMinima - 0.5) && d.mediaGeral < mediaMinima)
+    .sort((a,b)=> b.mediaGeral - a.mediaGeral)
+    .slice(0,10);
+
+  const possivelEvasao = considerados.filter(d => (d.mediaGeral !== null && d.mediaGeral < 5) && d.totalFaltas >= 100 && d.emRisco.length >= 5)
+    .sort((a,b)=> (b.totalFaltas - a.totalFaltas) || (b.emRisco.length - a.emRisco.length));
+
+  const faixasFaltas = [
+    {faixa:'75 faltas ou mais', alunos: considerados.filter(d=>d.totalFaltas >= 75).length},
+    {faixa:'50 a 74 faltas', alunos: considerados.filter(d=>d.totalFaltas >= 50 && d.totalFaltas < 75).length},
+    {faixa:'25 a 49 faltas', alunos: considerados.filter(d=>d.totalFaltas >= 25 && d.totalFaltas < 50).length},
+    {faixa:'0 a 24 faltas', alunos: considerados.filter(d=>d.totalFaltas < 25).length}
+  ];
+
+  return {mediaTurma, acimaMedia, abaixoMedia, disciplinasCriticas, alunosCriticos, alunosAtencao, alunosControlados, proximosMedia, possivelEvasao, faixasFaltas, totalComMedia: comMedia.length};
+}
+
+function renderAnalisesAvancadasHtml(dados){
+  const a = montarAnalisesAvancadas(dados);
+  const pct = (n,total) => total ? `${((n/total)*100).toFixed(1).replace('.', ',')}%` : '-';
+  const tabela = (titulo, head, rows, vazio='Sem dados suficientes.') => `
+    <h3 style="margin:14px 0 8px;color:#0f2f66">${titulo}</h3>
+    <table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
+      ${rows.length ? rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${head.length}">${vazio}</td></tr>`}
+    </tbody></table>`;
+  let html = `<div class="grid" style="margin-bottom:12px">
+    <div class="metric"><span>Média geral da turma</span><b>${mediaTexto(a.mediaTurma)}</b></div>
+    <div class="metric"><span>Alunos acima da média</span><b>${a.acimaMedia}</b><div class="small">${pct(a.acimaMedia,a.totalComMedia)}</div></div>
+    <div class="metric"><span>Alunos abaixo da média</span><b>${a.abaixoMedia}</b><div class="small">${pct(a.abaixoMedia,a.totalComMedia)}</div></div>
+    <div class="metric"><span>Possível evasão</span><b>${a.possivelEvasao.length}</b></div>
+  </div>`;
+  html += `<div style="background:#fee2e2;border:2px solid #dc2626;border-radius:14px;padding:14px;margin:14px 0;color:#7f1d1d">
+    <h3 style="margin:0 0 8px;color:#991b1b">🚨 Alunos com possível evasão</h3>
+    <p style="margin:0 0 10px">Critério: média geral menor que 5,0, 100 faltas ou mais e 5 ou mais disciplinas abaixo da média.</p>
+    <table><thead><tr><th>Aluno</th><th>Média geral</th><th>Total de faltas</th><th>Disciplinas em risco</th></tr></thead><tbody>
+      ${a.possivelEvasao.length ? a.possivelEvasao.map(d=>`<tr><td><strong>${d.aluno}</strong></td><td>${mediaTexto(d.mediaGeral)}</td><td>${d.totalFaltas}</td><td>${d.emRisco.length}</td></tr>`).join('') : `<tr><td colspan="4"><strong>Nenhum aluno identificado com possível evasão pelos critérios definidos.</strong></td></tr>`}
+    </tbody></table>
+  </div>`;
+  html += tabela('Disciplinas com maior dificuldade', ['Disciplina','Avaliados','Abaixo da média','% abaixo','Média'],
+    a.disciplinasCriticas.map(d=>[d.disciplina, d.avaliados, d.abaixo, `${d.percentual.toFixed(1).replace('.', ',')}%`, mediaTexto(d.media)]));
+  return html;
+}
+
 function render(dados){
   dadosGerados = dados;
   const turma = dados.find(d => d.turma && d.turma !== 'Turma não identificada')?.turma || 'Turma não identificada';
@@ -336,6 +426,7 @@ function render(dados){
     listaMt.innerHTML = '<p><span class="badge ok">Todos os alunos estão com 1ºMT lançada.</span></p>';
   }
   $('listaRanking').innerHTML = renderRankingHtml(dados);
+  $('listaAnalisesAvancadas').innerHTML = renderAnalisesAvancadasHtml(dados);
   const tbody = $('tbody'); tbody.innerHTML = '';
   dados.forEach(d => {
     const tr = document.createElement('tr');
@@ -487,6 +578,73 @@ function gerarPdfOrganizado(){
   desenharSegmentoRanking('Top 03 maiores presenças', rankings.porMaiorPresenca, [15,47,102]);
   desenharSegmentoRanking('Top 03 piores notas', rankings.porMenorNota, [146,64,14]);
   desenharSegmentoRanking('Top 03 piores frequências', rankings.porPiorFrequencia, [185,28,28]);
+
+  const analises = montarAnalisesAvancadas(dadosGerados);
+  if(y > pageH - 55){ doc.addPage(); cabecalho(); y = topoConteudo; }
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(11);
+  doc.text('Indicadores complementares da turma', margem, y);
+  y += 4;
+  doc.autoTable({
+    startY: y,
+    margin: { top: topoConteudo, left: margem, right: margem, bottom: margemRodape },
+    theme: 'grid',
+    head: [['Média geral', 'Acima da média', 'Abaixo da média', 'Possível evasão']],
+    body: [[mediaTexto(analises.mediaTurma), String(analises.acimaMedia), String(analises.abaixoMedia), String(analises.possivelEvasao.length)]],
+    styles: { fontSize: 9, halign: 'center', cellPadding: 2.4 },
+    headStyles: { fillColor: [15,47,102], textColor: 255, fontStyle: 'bold' },
+    didDrawPage: cabecalho
+  });
+  y = doc.lastAutoTable.finalY + 7;
+
+  if(y > pageH - 55){ doc.addPage(); cabecalho(); y = topoConteudo; }
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(10);
+  doc.setTextColor(153,27,27);
+  doc.text('Alunos com possível evasão', margem, y);
+  doc.setTextColor(0,0,0);
+  y += 4;
+  doc.autoTable({
+    startY: y,
+    margin: { top: topoConteudo, left: margem, right: margem, bottom: margemRodape },
+    theme: 'grid',
+    head: [['Aluno', 'Média geral', 'Total de faltas', 'Disciplinas em risco']],
+    body: analises.possivelEvasao.length ? analises.possivelEvasao.map(d => [
+      textoSeguro(d.aluno),
+      mediaTexto(d.mediaGeral),
+      String(d.totalFaltas),
+      String(d.emRisco.length)
+    ]) : [['Nenhum aluno identificado com possível evasão pelos critérios definidos.', '-', '-', '-']],
+    styles: { fontSize: 8, cellPadding: 2.2, overflow: 'linebreak', valign: 'top' },
+    headStyles: { fillColor: [220,38,38], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [254,242,242] },
+    columnStyles: { 0:{cellWidth:'auto'}, 1:{cellWidth:28, halign:'center'}, 2:{cellWidth:30, halign:'center'}, 3:{cellWidth:34, halign:'center'} },
+    didDrawPage: cabecalho
+  });
+  y = doc.lastAutoTable.finalY + 7;
+
+  function desenharTabelaAnalise(titulo, head, body, corCabecalho){
+    if(y > pageH - 45){ doc.addPage(); cabecalho(); y = topoConteudo; }
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(9.5);
+    doc.text(titulo, margem, y);
+    y += 3.5;
+    doc.autoTable({
+      startY: y,
+      margin: { top: topoConteudo, left: margem, right: margem, bottom: margemRodape },
+      theme: 'grid',
+      head: [head],
+      body: body.length ? body : [[...head.map((_,i)=> i===0 ? 'Sem dados suficientes' : '-')]],
+      styles: { fontSize: 7.8, cellPadding: 2, overflow: 'linebreak', valign: 'top' },
+      headStyles: { fillColor: corCabecalho, textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248,250,252] },
+      didDrawPage: cabecalho
+    });
+    y = doc.lastAutoTable.finalY + 6;
+  }
+
+  desenharTabelaAnalise('Disciplinas com maior dificuldade', ['Disciplina','Avaliados','Abaixo','% abaixo','Média'],
+    analises.disciplinasCriticas.map(d=>[textoSeguro(d.disciplina), String(d.avaliados), String(d.abaixo), `${d.percentual.toFixed(1).replace('.', ',')}%`, mediaTexto(d.media)]), [146,64,14]);
 
   const nm3Faltando = dadosGerados.filter(d=>d.disciplinasSemNm3 && d.disciplinasSemNm3.length);
   doc.setFont('helvetica','bold');
