@@ -266,6 +266,15 @@
       margin: 5px 0
     }
 
+    .pendenciaCell {
+      min-width: 210px;
+      white-space: pre-line
+    }
+
+    .colAlunoPendencia {
+      min-width: 300px
+    }
+
     @media print {
       body {
         background: #fff
@@ -454,8 +463,8 @@
 
         <section class="card alertaNm3 destaque" id="relatorioNm3Faltando">
           <div class="sectionTag">RELATÓRIO ACIMA</div>
-          <h2>Alunos com NM3 faltando</h2>
-          <p>Lista dos alunos que possuem uma ou mais disciplinas sem lançamento de NM3. Este relatório aparece antes do resumo geral para facilitar a conferência.</p>
+          <h2>Conferência geral de notas em branco</h2>
+          <p>Lista consolidada dos alunos que possuem uma ou mais disciplinas sem NM3 ou sem lançamento da média do 1º trimestre (1ºMT). Quando o aluno aparece em mais de uma situação, as pendências ficam na mesma linha.</p>
           <div id="listaNm3Faltando" class="faltandoBox"></div>
         </section>
 
@@ -783,23 +792,27 @@
       const limiteFaltas = Number($('limiteFaltas').value || 10);
       $('totalFaltas').textContent = dados.filter(d => d.faltasAltas && d.faltasAltas.length).length;
       const listaNm3 = $('listaNm3Faltando');
-      if (nm3Faltando.length) {
-        listaNm3.innerHTML = `<p><strong>${nm3Faltando.length} aluno(s) com NM3 faltando</strong></p>` +
-          `<table><thead><tr><th>Aluno</th><th>NM3 lançada</th><th>Disciplinas sem NM3</th></tr></thead><tbody>` +
-          nm3Faltando.map(d => `<tr><td><strong>${d.aluno}</strong></td><td><span class="badge atencao">${d.nm3Lancadas}/${d.totalDisciplinas}</span></td><td class="disciplinas">${d.disciplinasSemNm3.join('\n')}</td></tr>`).join('') +
+      const pendenciasNotas = dados
+        .filter(d => (d.disciplinasSemNm3 && d.disciplinasSemNm3.length) || (d.disciplinasSemMt && d.disciplinasSemMt.length))
+        .sort((a, b) => a.aluno.localeCompare(b.aluno));
+
+      if (pendenciasNotas.length) {
+        listaNm3.innerHTML = `<p><strong>${pendenciasNotas.length} aluno(s) com pendência de lançamento</strong></p>` +
+          `<table><thead><tr><th class="colAlunoPendencia">Aluno</th><th>NM3 lançada</th><th>1ºMT lançada</th><th>Disciplinas sem NM3</th><th>Disciplinas com 1ºMT em branco</th></tr></thead><tbody>` +
+          pendenciasNotas.map(d => `<tr>
+            <td><strong>${d.aluno}</strong></td>
+            <td><span class="badge ${d.disciplinasSemNm3.length ? 'atencao' : 'ok'}">${d.nm3Lancadas}/${d.totalDisciplinas}</span></td>
+            <td><span class="badge ${d.disciplinasSemMt.length ? 'atencao' : 'ok'}">${d.mtLancadas}/${d.totalDisciplinas}</span></td>
+            <td class="pendenciaCell">${d.disciplinasSemNm3.length ? d.disciplinasSemNm3.join('\n') : '<span class="badge ok">Sem pendência</span>'}</td>
+            <td class="pendenciaCell">${d.disciplinasSemMt.length ? d.disciplinasSemMt.join('\n') : '<span class="badge ok">Sem pendência</span>'}</td>
+          </tr>`).join('') +
           `</tbody></table>`;
       } else {
-        listaNm3.innerHTML = '<p><span class="badge ok">Todos os alunos estão com NM3 lançada.</span></p>';
+        listaNm3.innerHTML = '<p><span class="badge ok">Todos os alunos estão com NM3 e 1ºMT lançados.</span></p>';
       }
-      const listaMt = $('listaMtFaltando');
-      if (mtFaltando.length) {
-        listaMt.innerHTML = `<p><strong>${mtFaltando.length} aluno(s) com 1ºMT em branco</strong></p>` +
-          `<table><thead><tr><th>Aluno</th><th>1ºMT lançada</th><th>Disciplinas com 1ºMT em branco</th></tr></thead><tbody>` +
-          mtFaltando.map(d => `<tr><td><strong>${d.aluno}</strong></td><td><span class="badge atencao">${d.mtLancadas}/${d.totalDisciplinas}</span></td><td class="disciplinas">${d.disciplinasSemMt.join('\n')}</td></tr>`).join('') +
-          `</tbody></table>`;
-      } else {
-        listaMt.innerHTML = '<p><span class="badge ok">Todos os alunos estão com 1ºMT lançada.</span></p>';
-      }
+
+      const relatorioMt = $('relatorioMtFaltando');
+      if (relatorioMt) relatorioMt.style.display = 'none';
       $('listaRanking').innerHTML = renderRankingHtml(dados);
       $('listaAnalisesAvancadas').innerHTML = renderAnalisesAvancadasHtml(dados);
       const tbody = $('tbody'); tbody.innerHTML = '';
@@ -848,15 +861,7 @@
         doc.setFillColor(15, 47, 102);
         doc.rect(0, 0, pageW, 22, 'F');
 
-        // Logos do cabeçalho
-        try {
-          doc.addImage(LOGO_GRE, 'PNG', margem, 2, 20, 8);
-          doc.addImage(LOGO_SEDUC, 'PNG', margem + 24, 1.5, 26, 10);
-          doc.addImage(LOGO_ACELERA, 'PNG', margem + 54, 1.5, 34, 10);
-          doc.addImage(LOGO_GESTAO, 'PNG', margem + 92, 2, 14, 14);
-        } catch (e) {
-          console.warn('Falha ao inserir logos no PDF', e);
-        }
+        // Cabeçalho sem logos para evitar falha na geração do PDF.
 
         // Título
         doc.setTextColor(255, 255, 255);
@@ -1016,64 +1021,39 @@
       desenharTabelaAnalise('Disciplinas com maior dificuldade', ['Disciplina', 'Avaliados', 'Abaixo', '% abaixo', 'Média'],
         analises.disciplinasCriticas.map(d => [textoSeguro(d.disciplina), String(d.avaliados), String(d.abaixo), `${d.percentual.toFixed(1).replace('.', ',')}%`, mediaTexto(d.media)]), [146, 64, 14]);
 
-      const nm3Faltando = dadosGerados.filter(d => d.disciplinasSemNm3 && d.disciplinasSemNm3.length);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.text('Alunos com NM3 faltando', margem, y);
-      y += 4;
-
-      if (nm3Faltando.length) {
-        doc.autoTable({
-          startY: y,
-          margin: { top: topoConteudo, left: margem, right: margem, bottom: margemRodape },
-          theme: 'grid',
-          head: [['Aluno', 'NM3 lançada', 'Disciplinas sem NM3']],
-          body: nm3Faltando.map(d => [
-            textoSeguro(d.aluno),
-            `${d.nm3Lancadas}/${d.totalDisciplinas}`,
-            d.disciplinasSemNm3.join('; ')
-          ]),
-          styles: { fontSize: 8, cellPadding: 2.2, overflow: 'linebreak', valign: 'top' },
-          headStyles: { fillColor: [146, 64, 14], textColor: 255, fontStyle: 'bold' },
-          columnStyles: { 0: { cellWidth: 55 }, 1: { cellWidth: 25, halign: 'center' }, 2: { cellWidth: 'auto' } },
-          didDrawPage: cabecalho
-        });
-        y = doc.lastAutoTable.finalY + 8;
-      } else {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        doc.text('Todos os alunos estão com NM3 lançada.', margem, y);
-        y += 8;
-      }
-
-      const mtFaltando = dadosGerados.filter(d => d.disciplinasSemMt && d.disciplinasSemMt.length);
+      const pendenciasNotasPdf = dadosGerados
+        .filter(d => (d.disciplinasSemNm3 && d.disciplinasSemNm3.length) || (d.disciplinasSemMt && d.disciplinasSemMt.length))
+        .sort((a, b) => a.aluno.localeCompare(b.aluno));
       if (y > pageH - 55) { doc.addPage(); cabecalho(); y = topoConteudo; }
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
-      doc.text('Alunos com 1ºMT em branco', margem, y);
+      doc.text('Conferência geral de notas em branco', margem, y);
       y += 4;
 
-      if (mtFaltando.length) {
+      if (pendenciasNotasPdf.length) {
         doc.autoTable({
           startY: y,
           margin: { top: topoConteudo, left: margem, right: margem, bottom: margemRodape },
           theme: 'grid',
-          head: [['Aluno', '1ºMT lançada', 'Disciplinas com 1ºMT em branco']],
-          body: mtFaltando.map(d => [
+          head: [['Aluno', 'NM3 lançada', '1ºMT lançada', 'Disciplinas sem NM3', 'Disciplinas com 1ºMT em branco']],
+          body: pendenciasNotasPdf.map(d => [
             textoSeguro(d.aluno),
+            `${d.nm3Lancadas}/${d.totalDisciplinas}`,
             `${d.mtLancadas}/${d.totalDisciplinas}`,
-            d.disciplinasSemMt.join('; ')
+            d.disciplinasSemNm3.length ? d.disciplinasSemNm3.join('; ') : 'Sem pendência',
+            d.disciplinasSemMt.length ? d.disciplinasSemMt.join('; ') : 'Sem pendência'
           ]),
-          styles: { fontSize: 8, cellPadding: 2.2, overflow: 'linebreak', valign: 'top' },
-          headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-          columnStyles: { 0: { cellWidth: 55 }, 1: { cellWidth: 25, halign: 'center' }, 2: { cellWidth: 'auto' } },
+          styles: { fontSize: 7.5, cellPadding: 2, overflow: 'linebreak', valign: 'top' },
+          headStyles: { fillColor: [146, 64, 14], textColor: 255, fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [248, 250, 252] },
+          columnStyles: { 0: { cellWidth: 48 }, 1: { cellWidth: 22, halign: 'center' }, 2: { cellWidth: 22, halign: 'center' }, 3: { cellWidth: 82 }, 4: { cellWidth: 'auto' } },
           didDrawPage: cabecalho
         });
         y = doc.lastAutoTable.finalY + 8;
       } else {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
-        doc.text('Todos os alunos estão com 1ºMT lançada.', margem, y);
+        doc.text('Todos os alunos estão com NM3 e 1ºMT lançados.', margem, y);
         y += 8;
       }
 
